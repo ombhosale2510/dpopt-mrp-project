@@ -161,7 +161,7 @@ def main(arg_list=None):
     if args.device == 'cuda':
         model_args['device_map'] = 'auto'
         model_args['torch_dtype'] = torch.float16
-    model = AutoModelForCausalLM.from_pretrained(args.model, low_cpu_mem_usage=True,
+    model = AutoModelForCausalLM.from_pretrained(args.model, low_cpu_mem_usage=True, offload_folder="offload",
                                                  **model_args)
     tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=False, revision='main')
     if 'gpt2' in args.model or 'llama' in args.model.lower():
