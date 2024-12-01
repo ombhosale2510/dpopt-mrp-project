@@ -167,6 +167,7 @@ class Evaluator(object):
                 num_options.append(len(_candidate_texts))
 
         pred_logprobs = np.zeros((batch_size, len(self.label_words)))
+
         if self.is_openai_model:
             metric_results = evaluate_target_logprob_openai(self.model, self.tokenizer, expanded_texts, expanded_candidate_texts)
         else:
@@ -179,14 +180,44 @@ class Evaluator(object):
             pred_logprobs = logprobs.reshape((batch_size, num_options[0]))
 
             assert len(labels) == len(pred_logprobs)
+            # CHANGE HERE
+            #print(f"Labels: {labels}")
+            #print(f"Pred Logprobs: {pred_logprobs}")
+
+            #batch_losses = []
+            #for i, (target, pred_logprob) in enumerate(zip(labels, pred_logprobs)):
+                #if not isinstance(target, int):
+                    #raise ValueError(f"Invalid label at position {i}: {target}")
+                #if target < 0 or target >= len(pred_logprob):
+                    #raise IndexError(f"Label {i} ({target}) is out of range for pred_logprob: {pred_logprob}")
+                #batch_losses.append(-pred_logprob[target])
+
             batch_losses = [- pred_logprob[target] for target, pred_logprob in zip(labels, pred_logprobs)]
+            #CHANGE BELOW
+
+            #for i, label in enumerate(labels):
+                #if not isinstance(label, int):
+                    #raise ValueError(f"Invalid label at position {i}: {label}. Ensure labels are integers representing class indices.")
+            #try:
+                #batch_losses = [-pred_logprob[target] for target, pred_logprob in zip(labels, pred_logprobs)]
+            #except (ValueError, IndexError) as e:
+                #print(f"Error processing batch: {e}\nLabels: {labels}\nPred Logprobs: {pred_logprobs}")
+                #continue
             pred_labels = np.argmax(pred_logprobs, axis=1)
+
+        # Calculate perplexity
+        #avg_loss = np.mean(batch_losses)
+        #perplexity = np.exp(avg_loss)
+
+        #print(f"Perplexity: {perplexity}")
         return batch_losses, pred_labels
-    
+	
+
     def evaluate_prompt(self, dataset, instruct='', return_all=False, 
-                        shuffle=False, desc='eval', verbose=0, **kwargs):
+                    shuffle=False, desc='eval', verbose=0, **kwargs):
         all_losses, all_pred_labels, all_labels = [], [], []
         total, correct, loss = 0, 0, 0
+        total_perplexity, perplexity_count = 0, 0
 
         collate_fn = DataCollatorWithOptAndTemplate(
             instruct, self.label_words, self.eval_template
@@ -195,20 +226,21 @@ class Evaluator(object):
                         collate_fn=collate_fn)
         dl_bar = tqdm(dl, desc=desc)
         for batch in dl_bar:
-            # texts = batch['text']
-            # candidate_targets = batch['candidate_targets']
             labels = batch['labels']
 
             if verbose > 0:
                 print(f"Eval example:\nTexts: {batch['text'][0]}\n\nCandidates: {batch['candidate_texts'][0]}")
                 verbose -= 1
+            # CHANGE HERE
+            #valid_labels = all(isinstance(label, int) for label in labels)
+            #if not valid_labels:
+                #print(f"Skipping batch with invalid labels: {labels}")
+                #continue
 
             batch_losses, pred_labels = self.batch_eval_prompt(
                 batch['text'], batch['candidate_texts'], batch['labels'],
                 device=self.device, **kwargs)
 
-            # print(f"pred_labels: {pred_labels}")
-            # print(f"targets: {targets}")
             all_losses.extend(batch_losses)
             all_pred_labels.extend(pred_labels.tolist())
             all_labels.extend(batch['labels'])
@@ -216,15 +248,23 @@ class Evaluator(object):
             correct += sum([int(target == pred_label) for target, pred_label in zip(labels, pred_labels)])
             total += len(labels)
 
+            # Calculate and accumulate perplexity for the batch
+            avg_batch_loss = np.mean(batch_losses)
+            batch_perplexity = np.exp(avg_batch_loss)
+            total_perplexity += batch_perplexity
+            perplexity_count += 1
+
             acc = correct / total
             dl_bar.set_postfix_str(f"acc: {acc:.3f}")
         
         acc = correct / total
         loss = loss / total
+        avg_perplexity = total_perplexity / perplexity_count  # Aggregate perplexity
+
         if return_all:
-            return acc, loss, all_losses, all_pred_labels, all_labels
+            return acc, loss, avg_perplexity, all_losses, all_pred_labels, all_labels
         else:
-            return acc, loss
+            return acc, loss, avg_perplexity
 
     def find_best_instruct(self, instructs, save_dict, key_prefix='', dp_engine: ExpMechanism=None):
         instruct_metrics = defaultdict(list)
@@ -235,8 +275,8 @@ class Evaluator(object):
             print(f"Evaluate instruct\n", '[START]'+ instruct + '[END]')
             for set_name in eval_sets:
                 print(f"Evaluating {set_name} set...")
-                acc, loss = self.evaluate_prompt(self.dataset[set_name], instruct)
-                print(f"{set_name} | Accuracy: {acc:.3f} | Loss: {loss:.3f}")
+                acc, loss, avg_perplexity = self.evaluate_prompt(self.dataset[set_name], instruct)
+                print(f"{set_name} | Accuracy: {acc:.3f} | Loss: {loss:.3f} | Perplexity: {avg_perplexity:.3f}")
                 instruct_metrics[f"{key_prefix}{set_name} acc"].append(acc)
                 instruct_metrics[f"{key_prefix}{set_name} loss"].append(loss)
                 wandb.log({f"{key_prefix}{set_name} acc": acc, f"{key_prefix}{set_name} loss": loss}, commit=False)
@@ -263,8 +303,8 @@ class Evaluator(object):
         instruct = instructs[best_holdout_idx]
         print(f"\nEvaluating best-holdout instruct at {set_name} set...")
         print('[START]'+ instruct + '[END]')
-        acc, loss = self.evaluate_prompt(self.dataset[set_name], instruct)
-        print(f"best-holdout {set_name} | Accuracy: {acc:.3f} | Loss: {loss:.3f}")
+        acc, loss, avg_perplexity = self.evaluate_prompt(self.dataset[set_name], instruct)
+        print(f"best-holdout {set_name} | Accuracy: {acc:.3f} | Loss: {loss:.3f} | Perplexity: {avg_perplexity:.3f}")
         # update results
         k = key_prefix+'best_holdout_test_acc'
         wandb.summary[k] = acc

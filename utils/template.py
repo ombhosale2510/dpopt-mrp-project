@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 
 
 class GenerationTemplate:
@@ -67,13 +67,22 @@ class EvalTemplate:
         self.prompt = ''
 
     def fill(self, prompt=None, full_demo='', input='', output=''):
+    #def fill(self, prompt: str, full_demo: str, input: Any, output: str) -> str: #CHANGE HERE
         """
         Fills in the template with the given values.
         """
+
+        # CHANGE HERE !
+        #print(f"Template: {self.template}")
+        #print(f"[PROMPT]: {prompt} (type: {type(prompt)})")
+        #print(f"[full_DEMO]: {full_demo} (type: {type(full_demo)})")
+        #print(f"[INPUT]: {input} (type: {type(input)})")
+        #print(f"[OUTPUT]: {output} (type: {type(output)})")
+
         if prompt is None:
             prompt = self.prompt
-        return self.template.replace('[PROMPT]', prompt).replace(
-            '[full_DEMO]', full_demo).replace('[INPUT]', input).replace('[OUTPUT]', output)
+        #return self.template.replace('[PROMPT]', prompt).replace('[full_DEMO]', full_demo).replace('[INPUT]', input).replace('[OUTPUT]', output)
+        return self.template.replace('[PROMPT]', str(prompt)).replace('[full_DEMO]', str(full_demo)).replace('[INPUT]', str(input)).replace('[OUTPUT]', str(output)).rstrip()
 
     def convert_to_generation_template(self):
         """
@@ -298,6 +307,9 @@ class DataCollatorWithOptAndTemplate:
     eval_template: EvalTemplate
 
     def __call__(self, examples: List[Dict[str, Any]]) -> Dict[str, Any]:
+        if isinstance(examples[0], list):
+            examples = [{'sentence': ex[0], 'label': ex[1]} for ex in examples]
+        #change above
         batch = {}
         batch['text'] = []
         batch['candidate_targets'] = []

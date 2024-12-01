@@ -83,4 +83,4 @@ with gr.Blocks() as demo:
                     
                 test_button.click(test_interface, inputs=test_inputs, outputs=test_outputs)
 
-demo.launch()
+demo.launch(share=True)

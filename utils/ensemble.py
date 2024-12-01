@@ -10,7 +10,7 @@ from .dp import LDGumbelMechanism, NotFoundLDTop1, DPExpenseOverflow
 
 class InputTokenDataset(Dataset):
     def __init__(self, model_inputs, keys) -> None:
-        self.model_inputs = model_inputs
+        self.model_inputs = {k: v.to('cuda') for k, v in model_inputs.items()}  # Move inputs to CUDA #CHANGE HERE
         self.keys = keys
 
     def __getitem__(self, index):
@@ -24,6 +24,9 @@ class InputTokenDataset(Dataset):
 
 def majority_vote(tokens: torch.Tensor, dim=None, dp_engine: LDGumbelMechanism = None, k_bar: int = None):
     """return the highest vote or randomly choose from the top1."""
+    #CHANGE HERE
+    tokens = tokens.to('cuda')  # Move tokens to CUDA
+
     uni_tokens, cnts = tokens.unique(return_counts=True)
     token_votes = {token: vote for token, vote in zip(uni_tokens, cnts)}
 
@@ -33,8 +36,8 @@ def majority_vote(tokens: torch.Tensor, dim=None, dp_engine: LDGumbelMechanism =
         if len(max_idxs) == 1:
             return uni_tokens[max_idxs[0]], token_votes
         else:
-            # randomly choose one
-            idx = max_idxs[torch.randint(len(max_idxs), (1,))[0]]
+            # randomly choose one #CHANGE HERE
+            idx = max_idxs[torch.randint(len(max_idxs), (1,)).to('cuda')[0]]
             return uni_tokens[idx], token_votes
     else:
         priv_idx = dp_engine.get_top1(cnts, dim, k_bar=k_bar)
@@ -61,6 +64,17 @@ def ensemble_generate(model, input_ids, attention_mask, eos_token_id, pad_token_
                    do_sample=False, temperature=None, top_p=None, top_k=None,
                    max_new_tokens=20, no_repeat_ngram_size=None, repetition_penalty=None, batch_size=0,
                    dp_engine=None):
+    #CHANGE HERE TO MOVE MODEL AND INPUTS TO CUDA
+    model = model.to('cuda')
+    input_ids = input_ids.to('cuda')
+    attention_mask = attention_mask.to('cuda') if attention_mask is not None else None
+    
+    # Ensure all tensors are on the same device
+    device = input_ids.device
+    eos_token_id = torch.tensor([eos_token_id], device=device)
+    pad_token_id = torch.tensor([pad_token_id], device=device)
+
+
     # model.generation_config
     logits_processor = LogitsProcessorList([])
     logits_processor.append(MinLengthLogitsProcessor(10, eos_token_id=eos_token_id))
@@ -136,6 +150,13 @@ def greedy_search(
     print(tokenizer.decode(cur_input_ids[0, input_ids.shape[1]:], skip_special_tokens=True))
     ```
     """
+
+
+    model = model.to('cuda')
+    input_ids = input_ids.to('cuda')
+    #attention_mask = attention_mask.to('cuda') if attention_mask is not None else None
+
+
     # init values
     logits_processor = logits_processor if logits_processor is not None else LogitsProcessorList()
     logits_warper = logits_warper if logits_warper is not None else LogitsProcessorList()
@@ -146,14 +167,15 @@ def greedy_search(
     cur_input_ids = input_ids.detach().clone()
     seq_token_votes = []
     model_kwargs = {}
-    if attention_mask is not None:
-        raise NotImplementedError('Have not implemented batched attention mask.')
+    #print("ATTENTION MASK: ",attention_mask)
+    #if attention_mask is not None:
+        #raise NotImplementedError('Have not implemented batched attention mask.')
 
     eos_token_id_tensor = torch.tensor([eos_token_id]).to(cur_input_ids.device) if eos_token_id is not None else None
 
     unfinished_sequences = torch.ones(cur_input_ids.shape[0], dtype=torch.long, device=cur_input_ids.device)
     if batch_size > 0:
-        assert attention_mask is None, "Not supported for model_kwargs"
+        #assert attention_mask is None, "Not supported for model_kwargs"
         model_kwargs_batch = [copy.deepcopy(model_kwargs) for _ in range(int(np.ceil(len(cur_input_ids) / batch_size)))]
 
         ds_keys = ['input_ids']
@@ -167,8 +189,8 @@ def greedy_search(
             next_token_logits = []
             ds.model_inputs['input_ids'] = cur_input_ids
             for i, batch_data in enumerate(dl):
-                _model_kwargs = model_kwargs_batch[i]
-                model_inputs = model.prepare_inputs_for_generation(batch_data['input_ids'], **_model_kwargs)
+                _model_kwargs = model_kwargs_batch[i] #CHANGE BELOW HERE
+                model_inputs = model.prepare_inputs_for_generation(batch_data['input_ids'].to('cuda'), **_model_kwargs)
                 _outputs = model(#batch_data['input_ids'], **{k: v for k, v in model_inputs.items() if k not in ds_keys}, 
                                  **model_inputs,
                                  return_dict=True,)
@@ -184,7 +206,7 @@ def greedy_search(
         else:
             model_inputs = model.prepare_inputs_for_generation(cur_input_ids, **model_kwargs)
             outputs = model(**model_inputs, return_dict=True,)
-            next_token_logits = outputs.logits[:, -1, :]
+            next_token_logits = outputs.logits[:, -1, :].to('cuda')
             model_kwargs = model._update_model_kwargs_for_generation(
                 outputs, model_kwargs, is_encoder_decoder=model.config.is_encoder_decoder
             )
@@ -200,7 +222,7 @@ def greedy_search(
 
         # majority vote
         try:
-            majority_token, token_votes = majority_vote(next_tokens, token_dim, dp_engine=dp_engine)
+            majority_token, token_votes = majority_vote(next_tokens.to('cuda'), token_dim, dp_engine=dp_engine)
 
             # eps, delta = dp_engine.get_dp_expense()
             # print(f"#### dp_engine dp eps={eps:.4f}, delta={delta:.4f}")
@@ -258,6 +280,9 @@ def greedy_search(
         if unfinished_sequences.max() == 0:
             # print(f"EOS")
             break
-        if stopping_criteria(cur_input_ids, None):
+        #print(f"Current Input IDs: {cur_input_ids}")
+        #print(f"Stopping Criteria Output: {stopping_criteria(cur_input_ids, None)}")
+
+        if stopping_criteria(cur_input_ids, None).any():
             break
     return cur_input_ids

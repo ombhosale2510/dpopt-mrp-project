@@ -166,3 +166,44 @@ data/
 
 openai_config.py
 flagged
+
+
+# Ignore large model directories
+vicuna-13b-v1.1/
+vicuna-13b-v1.3/
+vicuna-13b-v1.5/
+vicuna-7b-v1.3/
+vicuna-7b-v1.5/
+vicuna-7b-v1.5-16k/
+Qwen2.5-1.5B/
+Qwen2.5-7B/
+opt-1.3b/
+opt-125m/
+opt-2.7b/
+opt-6.7b/
+Meta-Llama-3-8B-Instruct-GGUF/
+Llama-2-13B-chat-GPTQ/
+Llama-2-7b/
+Llama-2-7b-chat-hf/
+Llama-2-7B-GPTQ/
+Llama-2-7b-hf/
+Llama-3.1-8B/
+Llama-3.2-1B/
+Llama-3.2-3B/
+gemma-7b/
+gemini/
+albert-base-v2/
+CodeLlama-7b-hf/
+open_llama_13b/
+
+# Optional: Ignore other common large directories or files
+*.ckpt
+*.h5
+*.pth
+*.bin
+*.tar.gz
+*.zip
+*.onnx
+__pycache__/
+*.log
+*.out

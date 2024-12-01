@@ -4,7 +4,7 @@ from copy import deepcopy
 import argparse, os
 import numpy as np
 import wandb
-from transformers import set_seed, AutoModelForCausalLM, AutoTokenizer
+from transformers import set_seed, AutoModelForCausalLM, AutoTokenizer, AutoModelForSeq2SeqLM
 
 from utils.utils import make_if_not_exist, str2bool
 from utils.template import get_eval_template
@@ -15,6 +15,7 @@ from utils.evaluate import Evaluator
 
 CHECKPOINT_ROOT = './checkpoint'
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') # device = cuda
 
 def config_args(parser: argparse.ArgumentParser):
     parser.add_argument('--ape_mode', default='bwd', choices=['bwd', 'iid_ibwd'], type=str,
@@ -26,7 +27,7 @@ def config_args(parser: argparse.ArgumentParser):
     parser.add_argument('--data', default='sst2', choices=['sst2', 'trec', 'disaster', 'mpqa'])
     parser.add_argument('--model', default='lmsys/vicuna-7b-v1.3', help="model for generating prompts.")
     parser.add_argument('--instruct_type', default='vicuna', type=str, help='instruction format.')
-    parser.add_argument('--batch_size', default=8, type=int, help="batch size for evaluation")
+    parser.add_argument('--batch_size', default=2, type=int, help="batch size for evaluation")
     parser.add_argument('--holdout_ratio', default=0.01, type=float, help='ratio of training data to be held out for validation.')
     parser.add_argument('--test_ratio', default=1., type=float, help='ratio of testing data to be used.')
     # prompt generation
@@ -37,7 +38,7 @@ def config_args(parser: argparse.ArgumentParser):
     parser.add_argument('--max_new_tokens', default=128, type=int, help='max num of tokens for prompt')
     parser.add_argument('--ensemble_gen', default=False, type=str2bool, help='ensemble all meta prompts.')
     parser.add_argument('--ensemble_num', default=205, type=int, help='num of demo subsets for ensemble.')
-    parser.add_argument('--gen_batch_size', default=8, type=int, help='batch size when generating prompts.')
+    parser.add_argument('--gen_batch_size', default=2, type=int, help='batch size when generating prompts.')
     parser.add_argument('--gen_temp', default=0.9, type=float,
                         help='generation temperature on samplng tokens. 1 means no temp. Smaller values means less variance.')
     parser.add_argument('--rep_penalty', default=1., type=float,
@@ -122,7 +123,8 @@ def main(arg_list=None):
     
     set_seed(args.seed)
     rng = np.random.RandomState(args.seed)
-
+    
+    print("Arguments passed for this run: ",args)
     render_runname(args)
     make_if_not_exist(args.save_path)
 
@@ -133,7 +135,6 @@ def main(arg_list=None):
 
     # load data
     dataset, label_words = get_dataset(args.data, args.holdout_ratio, args.test_ratio, rng)
-
     # config DP
     if args.dp_eps is not None:
         n_sample = len(dataset['train'])
@@ -159,13 +160,43 @@ def main(arg_list=None):
     # Load model
     model_args = {'revision': 'main'}
     if args.device == 'cuda':
-        model_args['device_map'] = 'auto'
+        model_args['device_map'] = 'cuda'
         model_args['torch_dtype'] = torch.float16
-    model = AutoModelForCausalLM.from_pretrained(args.model, low_cpu_mem_usage=True, offload_folder="offload",
-                                                 **model_args)
-    tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=False, revision='main')
+    model = AutoModelForCausalLM.from_pretrained(
+						#'./vicuna-7b-v1.3/',
+						args.model,
+                                                #'./vicuna-13b-v1.3/',
+                                                #'./Llama-2-7b/',
+                                                #'./vicuna-7b-v1.5/',
+                                                #'./Llama-2-7b-hf/',
+                                                #'./albert-base-v2/',
+                                                cache_dir=".cache",
+						low_cpu_mem_usage=True,
+						offload_folder="offload",
+                                                local_files_only=True,
+						**model_args).to(device)
+    #model = AutoModelForSeq2SeqLM.from_pretrained('./gemini/',cache_dir=".cache",low_cpu_mem_usage=True,offload_folder="offload",local_files_only=True,**model_args).to(device)
+    tokenizer = AutoTokenizer.from_pretrained(
+						#'./vicuna-7b-v1.3/',
+						args.model,
+                                                #'./vicuna-13b-v1.3/',
+                                                #'./Llama-2-7b-hf/',
+                                                #'./Llama-2-7b/',
+                                                #'./vicuna-7b-v1.5/',
+                                                #'./albert-base-v2/',
+                                                cache_dir=".cache",
+						use_fast=False,
+						revision='main',
+                                                padding=True,
+						device_map='cuda')
+    #print("TOKENIZER.PAD_TOKEN: ",tokenizer.pad_token)
+    #print("TOKENIZER.EOS_TOKEN: ",tokenizer.eos_token)
+    #tokenizer.add_special_tokens({'pad_token': '</s>'})
+    print("TOKENIZER.PAD_TOKEN: ",tokenizer.pad_token)
     if 'gpt2' in args.model or 'llama' in args.model.lower():
         tokenizer.pad_token = tokenizer.eos_token
+    #if tokenizer.pad_token == 'null':
+        #tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = 'left'
     tokenizer.truncation_side = 'left'
     disable_att_mask =  ('llama' in args.model) or ('vicuna' in args.model)  # llama may have bugs on logits
@@ -235,7 +266,9 @@ def main(arg_list=None):
         else:
             final_eps, final_delta = 0., 0.
         save_dict['generated_instructs'] = generated_instructs
-        save_dict['used_demos'] = used_demos
+       	save_dict['used_demos'] = used_demos
+        #print("SAVEDICT_USED_DEMOS", save_dict['used_demos']) # To check
+        #print("SAVE_DICT",save_dict) # To check
         torch.save(save_dict, args.save_file)
         print(f"save results => {args.save_file}")
 

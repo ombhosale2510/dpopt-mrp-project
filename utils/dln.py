@@ -236,12 +236,14 @@ class BackwardInstructGenerator(InstructGenerator):
         if num_meta_prompt is None:
             num_meta_prompt = num_prompt
         cur_instruct = init_instruct
+        print("CUR_INSTRUCT = ",cur_instruct) # TO CHECK CUR_INSTRUCT
         generated_instructs, used_demos = [], []  # will not keep used demos
+        print("USED_DEMOS_IN_DLN: ",used_demos)
         for i_prompt in range(num_prompt):
             print(f"[Iter {i_prompt}/{num_prompt}] generating  prompt")
             _generated_instructs, _used_demos = self.generate_instruct_bwd(cur_instruct, num_demos, dataset, rng, evaluator, num_prompt=1, num_meta_prompt=num_meta_prompt, **kwargs)
             generated_instructs.extend(_generated_instructs)
-            # used_demos.extend(_used_demos)
+            used_demos.extend(_used_demos)  #CHANGE HERE, UNCOMMENTED
             if not iid_instruct:
                 cur_instruct = _generated_instructs[0]
                 assert 'prediction' not in dataset[0], "For not iid_instruct, the demo predictions have to regenerated every iter."
@@ -261,7 +263,7 @@ class BackwardInstructGenerator(InstructGenerator):
             return new_ex
         new_dataset = [process(d) for d in dataset]
         # input_key=evaluator.eval_template.input_key
-        acc, loss, losses, all_pred_labels, all_targets = evaluator.evaluate_prompt(new_dataset, cur_instruct, return_all=True, shuffle=False, desc=f"dln-fwd")
+        acc, loss, avg_perplexity, losses, all_pred_labels, all_targets = evaluator.evaluate_prompt(new_dataset, cur_instruct, return_all=True, shuffle=False, desc=f"dln-fwd")
         for i, d in enumerate(new_dataset):
             d['prediction'] = all_pred_labels[i]
         assert 'prediction' in new_dataset[0]

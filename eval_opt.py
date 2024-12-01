@@ -24,8 +24,8 @@ if __name__ == '__main__':
                         choices=['resume_best_gen', 'manual', 
                                  'ICL', 'empty', 'init_instruct'],
                         help='select prompt to evaluate')
-    parser.add_argument('--test_model', default='lmsys/vicuna-13b-v1.3')
-    parser.add_argument('--test_batch_size', default=8, type=int)
+    parser.add_argument('--test_model', default='lmsys/vicuna-7b-v1.3')
+    parser.add_argument('--test_batch_size', default=2, type=int)
     config_args(parser)
     # device
     parser.add_argument('--device', default='cuda')
@@ -62,6 +62,9 @@ if __name__ == '__main__':
         best_gen_instruct = loaded['generated_instructs'][best_idx]
         print(
             f"Loaded best_holdout instruct with test acc ({loaded['best_holdout_test_acc']:.3f})\n[START]{best_gen_instruct}[END]")
+        # CHANGE BELOW
+        used_demos = loaded['used_demos']
+        #print("Loaded used_demos: ", used_demos[:3])
         instructs_to_eval['best gen'] = best_gen_instruct
 
     elif args.mode == 'ICL':
@@ -106,10 +109,10 @@ if __name__ == '__main__':
         res_dict = {}
 
         # Evaluate on test set
-        acc, loss, te_losses, *_ = evaluator.evaluate_prompt(
+        acc, loss, avg_perplexity, te_losses, *_ = evaluator.evaluate_prompt(
             dataset['validation'], instruct=instruct, return_all=True, verbose=1,
             no_parallel=args.no_parallel, add_special_tokens=args.add_special_tokens)
-        print(f"({i_inst}) Instruct {name} | Accuracy: {acc:.3f} | Loss: {loss:.3f}")
+        print(f"({i_inst}) Instruct {name} | Accuracy: {acc:.3f} | Loss: {loss:.3f} | avg_Perplexity: {avg_perplexity:.3f}")
         if len(instructs_to_eval) > 1:
             wandb.summary[f"{name} acc"] = acc
             wandb.summary[f"{name} loss"] = loss
